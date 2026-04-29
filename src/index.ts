@@ -18,6 +18,49 @@ function requireToken(request: any, reply: any, done: () => void) {
   done()
 }
 
+// ── Normaliza payload — WhatsMiau envia data.messages[] ou data diretamente ──
+function extractMessage(payload: any): { phone: string; text: string; buttonId: string; fromMe: boolean } | null {
+  // Formato novo: data.messages[0]
+  const msg = payload?.data?.messages?.[0] ?? payload?.data
+
+  if (!msg) return null
+
+  const fromMe = msg?.key?.fromMe ?? false
+  const remoteJid: string = msg?.key?.remoteJid ?? ''
+  if (!remoteJid) return null
+
+  const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '')
+  const text: string = msg?.message?.conversation ?? msg?.message?.extendedTextMessage?.text ?? ''
+  const buttonId: string = msg?.message?.buttonsResponseMessage?.selectedButtonId ?? ''
+
+  return { phone, text, buttonId, fromMe }
+}
+
+// ── POST /webhook ────────────────────────────────────────────────────────────
+app.post('/webhook', async (request, reply) => {
+  const payload = request.body as any
+
+  app.log.info({ payload: JSON.stringify(payload) }, 'webhook recebido')
+
+  const msg = extractMessage(payload)
+  if (!msg || msg.fromMe) return reply.send({ ok: true })
+
+  const { phone, text, buttonId } = msg
+
+  if (buttonId) {
+    if (buttonId === 'opt_in') {
+      await sendTextMessage(phone, 'Que ótimo! Fico feliz que podemos nos falar por aqui 😊')
+    } else if (buttonId === 'opt_out') {
+      await sendTextMessage(phone, 'Tudo bem, obrigado pela resposta! 🙏')
+    }
+    return reply.send({ ok: true })
+  }
+
+  app.log.info({ phone, text }, 'mensagem recebida')
+
+  return reply.send({ ok: true })
+})
+
 // ── POST /send-text ──────────────────────────────────────────────────────────
 app.post('/send-text', { preHandler: requireToken }, async (request, reply) => {
   const { number, text } = request.body as { number?: string; text?: string }
@@ -33,34 +76,6 @@ app.post('/send-text', { preHandler: requireToken }, async (request, reply) => {
     app.log.error({ err: err?.response?.data || err?.message }, 'Erro ao enviar mensagem')
     return reply.code(502).send({ error: 'Falha ao enviar mensagem', detail: err?.response?.data })
   }
-})
-
-// ── POST /webhook ────────────────────────────────────────────────────────────
-app.post('/webhook', async (request, reply) => {
-  const payload = request.body as any
-
-  app.log.info({ payload: JSON.stringify(payload) }, 'webhook recebido')
-
-  if (payload?.data?.key?.fromMe) {
-    return reply.send({ ok: true })
-  }
-
-  const remoteJid = payload?.data?.key?.remoteJid
-  if (!remoteJid) return reply.send({ ok: true })
-
-  const phone = remoteJid.replace('@s.whatsapp.net', '')
-
-  const buttonId = payload?.data?.message?.buttonsResponseMessage?.selectedButtonId
-  if (buttonId) {
-    if (buttonId === 'opt_in') {
-      await sendTextMessage(phone, 'Que ótimo! Fico feliz que podemos nos falar por aqui 😊')
-    } else if (buttonId === 'opt_out') {
-      await sendTextMessage(phone, 'Tudo bem, obrigado pela resposta! 🙏')
-    }
-    return reply.send({ ok: true })
-  }
-
-  return reply.send({ ok: true })
 })
 
 // ── Startup ──────────────────────────────────────────────────────────────────
