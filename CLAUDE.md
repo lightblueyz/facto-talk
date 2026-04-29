@@ -2,6 +2,10 @@
 
 Bot conversacional no WhatsApp para anotar pedidos, fazer agendamentos e atender clientes.
 
+## Repositório
+
+**https://github.com/lightblueyz/facto-talk**
+
 ## Stack
 
 - **Runtime:** Node.js + TypeScript
@@ -14,10 +18,10 @@ Bot conversacional no WhatsApp para anotar pedidos, fazer agendamentos e atender
 
 ```
 src/
-  index.ts          # Servidor Fastify com webhook
+  index.ts          # Servidor Fastify com webhook + resposta automática de botões
   whatsapp.ts       # Cliente WhatsMiau (sendTextMessage)
   send-test.ts      # Script: envia mensagem de texto
-  send-buttons.ts   # Script: envia mensagem com botões
+  send-buttons.ts   # Script: envia mensagem com botões (opt_in / opt_out)
 ```
 
 ## Comandos
@@ -37,7 +41,7 @@ npx tsx src/send-buttons.ts 5519998170609 # Envia botões
 
 ### Endpoints confirmados
 - `POST /v2/message/sendText/:instance` — texto simples ✅
-- `POST /v2/message/sendButtons/:instance` — botões (testado, enviou com sucesso)
+- `POST /v2/message/sendButtons/:instance` — botões ✅
 - `POST /v2/webhook/set/:instance` — configura webhook
 - `GET /v2/webhook/find/:instance` — consulta webhook atual
 - `GET /v2/instance/fetchInstances` — lista instâncias
@@ -46,8 +50,10 @@ npx tsx src/send-buttons.ts 5519998170609 # Envia botões
 - A instância anterior tinha espaço no nome (`Facto Talk_d3c6f726`) e causava "instance not found" — a nova (`FactoTalk_d3c6f726`) funciona
 - O endpoint correto usa `/v2/` (sem isso também falha)
 - A API key fica no header `apikey` (não Bearer)
-- O webhook via API (`/v2/webhook/set`) retorna a URL interna do WhatsMiau na resposta, mas o GET mostra a URL real configurada — a URL real só é atualizada pelo painel do dashboard
+- O webhook via API (`/v2/webhook/set`) retorna a URL interna do WhatsMiau na resposta, mas o GET mostra a URL real configurada — **a URL real só é atualizada pelo painel do dashboard**
 - O WhatsMiau Cloud às vezes tem instabilidade (timeout em `147.79.83.233`)
+- O localtunnel (`loca.lt`) é instável: pode retornar 503 e morrer — reiniciar gera nova URL
+- **Armadilha:** se a URL do webhook for colada com espaço no final (ex: `/webhook `) o WhatsMiau manda para `/webhook%20` e o servidor retorna 404 — verificar sem espaço
 
 ### Payload do webhook recebido
 ```json
@@ -77,14 +83,13 @@ O `selectedButtonId` fica em `data.message.buttonsResponseMessage.selectedButton
 
 1. Subir servidor: `npm run dev`
 2. Criar tunnel: `npx localtunnel --port 3000` → copiar URL
-3. Configurar no painel WhatsMiau ou via API:
-   ```bash
-   curl -X POST "https://api.whatsmiau.dev/v2/webhook/set/FactoTalk_d3c6f726" \
-     -H "apikey: $WHATSMIAU_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"url":"https://SUA-URL.loca.lt/webhook","enabled":true,"events":["MESSAGES_UPSERT","MESSAGES_UPDATE"]}'
+3. Testar se o tunnel está vivo: `curl -X POST https://SUA-URL.loca.lt/webhook -H "Content-Type: application/json" -d '{"test":true}'` — deve retornar `{"ok":true}`
+4. Atualizar **no painel do WhatsMiau** (não via API — a API não atualiza a URL real):
    ```
-4. **Atenção:** o localtunnel gera URL nova a cada restart — sempre atualizar no painel
+   https://SUA-URL.loca.lt/webhook
+   ```
+5. **Atenção:** colar a URL sem espaço no final e sem `/webhook ` com espaço
+6. O localtunnel gera URL nova a cada restart — sempre atualizar no painel
 
 ## Variáveis de Ambiente (.env)
 
@@ -104,7 +109,7 @@ PORT=3000
 
 ## Próximos Passos
 
-- [ ] Testar resposta automática dos botões (opt_in / opt_out) com webhook funcionando
+- [ ] Confirmar resposta automática dos botões (opt_in / opt_out) com webhook funcionando sem espaço na URL
 - [ ] Testar outros tipos de mensagem (lista, enquete, localização, mídia)
 - [ ] Integrar Claude API para bot conversacional
 - [ ] Deploy em servidor com URL fixa (Railway, Render, Fly.io) para dispensar localtunnel
