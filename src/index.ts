@@ -1,9 +1,19 @@
 import 'dotenv/config'
 import Fastify from 'fastify'
 import axios from 'axios'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { sendTextMessage } from './whatsapp'
 
 const app = Fastify({ logger: true })
+
+const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
+const model = genai.getGenerativeModel({
+  model: 'gemini-2.5-flash-lite-preview-06-17',
+  systemInstruction: 'Você é o assistente do Facto Insights, uma plataforma de fidelização de clientes. Responda de forma simpática, direta e em português brasileiro. Seja conciso — mensagens curtas, no estilo WhatsApp.',
+})
+
+// Histórico de conversa por número (em memória)
+const conversations = new Map<string, { role: string; parts: { text: string }[] }[]>()
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
 const API_TOKEN = process.env.TALK_API_TOKEN
@@ -18,11 +28,9 @@ function requireToken(request: any, reply: any, done: () => void) {
   done()
 }
 
-// ── Normaliza payload — WhatsMiau envia data.messages[] ou data diretamente ──
+// ── Normaliza payload WhatsMiau ──────────────────────────────────────────────
 function extractMessage(payload: any): { phone: string; text: string; buttonId: string; fromMe: boolean } | null {
-  // Formato novo: data.messages[0]
   const msg = payload?.data?.messages?.[0] ?? payload?.data
-
   if (!msg) return null
 
   const fromMe = msg?.key?.fromMe ?? false
@@ -40,23 +48,36 @@ function extractMessage(payload: any): { phone: string; text: string; buttonId: 
 app.post('/webhook', async (request, reply) => {
   const payload = request.body as any
 
-  app.log.info({ payload: JSON.stringify(payload) }, 'webhook recebido')
-
   const msg = extractMessage(payload)
   if (!msg || msg.fromMe) return reply.send({ ok: true })
 
   const { phone, text, buttonId } = msg
 
   if (buttonId) {
-    if (buttonId === 'opt_in') {
-      await sendTextMessage(phone, 'Que ótimo! Fico feliz que podemos nos falar por aqui 😊')
-    } else if (buttonId === 'opt_out') {
-      await sendTextMessage(phone, 'Tudo bem, obrigado pela resposta! 🙏')
-    }
+    if (buttonId === 'opt_in') await sendTextMessage(phone, 'Que ótimo! Fico feliz que podemos nos falar por aqui 😊')
+    else if (buttonId === 'opt_out') await sendTextMessage(phone, 'Tudo bem, obrigado pela resposta! 🙏')
     return reply.send({ ok: true })
   }
 
+  if (!text) return reply.send({ ok: true })
+
   app.log.info({ phone, text }, 'mensagem recebida')
+
+  try {
+    const history = conversations.get(phone) ?? []
+    const chat = model.startChat({ history })
+    const result = await chat.sendMessage(text)
+    const response = result.response.text()
+
+    history.push({ role: 'user', parts: [{ text }] })
+    history.push({ role: 'model', parts: [{ text: response }] })
+    conversations.set(phone, history)
+
+    await sendTextMessage(phone, response)
+    app.log.info({ phone, response }, 'resposta enviada')
+  } catch (err: any) {
+    app.log.error({ err: err?.message }, 'Erro ao chamar Gemini')
+  }
 
   return reply.send({ ok: true })
 })
@@ -64,10 +85,7 @@ app.post('/webhook', async (request, reply) => {
 // ── POST /send-text ──────────────────────────────────────────────────────────
 app.post('/send-text', { preHandler: requireToken }, async (request, reply) => {
   const { number, text } = request.body as { number?: string; text?: string }
-
-  if (!number || !text) {
-    return reply.code(400).send({ error: 'number e text são obrigatórios' })
-  }
+  if (!number || !text) return reply.code(400).send({ error: 'number e text são obrigatórios' })
 
   try {
     const result = await sendTextMessage(number, text)
@@ -105,9 +123,6 @@ async function registerWebhook() {
 const PORT = Number(process.env.PORT) || 3000
 
 app.listen({ port: PORT, host: '0.0.0.0' }, async (err) => {
-  if (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  if (err) { app.log.error(err); process.exit(1) }
   await registerWebhook()
 })
