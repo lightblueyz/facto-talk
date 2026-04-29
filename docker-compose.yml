@@ -1,0 +1,17 @@
+services:
+  talk:
+    build: .
+    container_name: facto-talk
+    ports:
+      - "3020:3000"
+    volumes:
+      - ./src:/app/src
+    environment:
+      - PORT=3000
+      - WHATSMIAU_API_KEY=${WHATSMIAU_API_KEY}
+      - WHATSMIAU_INSTANCE=${WHATSMIAU_INSTANCE:-FactoTalk_d3c6f726}
+      - WHATSMIAU_BASE_URL=${WHATSMIAU_BASE_URL:-https://api.whatsmiau.dev}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TALK_PUBLIC_URL=${TALK_PUBLIC_URL}
+      - TALK_API_TOKEN=${TALK_API_TOKEN}
+    restart: unless-stopped
