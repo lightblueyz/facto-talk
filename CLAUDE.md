@@ -5,6 +5,7 @@ Bot conversacional no WhatsApp para anotar pedidos, fazer agendamentos e atender
 ## Repositório
 
 **https://github.com/lightblueyz/facto-talk**
+Push access: conta `cucharo` (PAT em `/home/cucharo/projetos_rafael/facto_software_house/.env`)
 
 ## Stack
 
@@ -12,26 +13,68 @@ Bot conversacional no WhatsApp para anotar pedidos, fazer agendamentos e atender
 - **Servidor:** Fastify
 - **WhatsApp API:** WhatsMiau Cloud v2 (Evolution API hospedado)
 - **IA:** Claude API (Haiku 4.5) — ainda não integrado, estrutura pronta em `src/index.ts`
-- **Tunnel local:** localtunnel (`npx localtunnel --port 3000`)
+
+## Deploy
+
+**Produção:** `https://factotalk.facto.ia.br`
+**VPS:** Hostinger, SSH alias `facto` (user `clawd`, IP `187.77.52.105`, key `~/.ssh/facto_vps`)
+**Código no VPS:** `/opt/facto/apps/factotalk/`
+**Container:** `facto-talk` porta `3020:3000`
+**Orquestrador:** `docker compose` (v2, sem hífen) — o VPS não tem `docker-compose` v1
+
+### Como o deploy funciona
+
+Push para `master` no GitHub → o VPS detecta e faz pull + `docker compose up -d` automaticamente.
+
+### Após qualquer alteração de env vars no VPS
+
+```bash
+ssh facto "cd /opt/facto/apps/factotalk && docker compose up -d"
+```
+(não use `docker restart` — não relê o `.env`)
+
+### .env de produção
+
+Fica em `/opt/facto/apps/factotalk/.env` (não vai para o git). Conteúdo atual:
+
+```
+WHATSMIAU_API_KEY=00c348b3-217e-4d45-8b70-d0622a0c1c2c
+WHATSMIAU_INSTANCE=FactoTalk_d3c6f726
+WHATSMIAU_BASE_URL=https://api.whatsmiau.dev
+ANTHROPIC_API_KEY=
+TALK_PUBLIC_URL=https://factotalk.facto.ia.br
+TALK_API_TOKEN=facto-talk-secret-2026
+PORT=3000
+```
 
 ## Estrutura do Projeto
 
 ```
 src/
-  index.ts          # Servidor Fastify com webhook + resposta automática de botões
+  index.ts          # Servidor Fastify: POST /webhook + POST /send-text
   whatsapp.ts       # Cliente WhatsMiau (sendTextMessage)
   send-test.ts      # Script: envia mensagem de texto
   send-buttons.ts   # Script: envia mensagem com botões (opt_in / opt_out)
 ```
 
-## Comandos
+## Endpoints
+
+### POST /send-text
+Envia mensagem para qualquer número. Autenticado por Bearer token.
 
 ```bash
-npm run dev         # Sobe o servidor (porta 3000)
-npx localtunnel --port 3000  # Expõe URL pública
-npx tsx src/send-test.ts 5519998170609    # Envia texto
-npx tsx src/send-buttons.ts 5519998170609 # Envia botões
+curl -X POST https://factotalk.facto.ia.br/send-text \
+  -H "Authorization: Bearer facto-talk-secret-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"number":"5519998170609","text":"oi, Rafael"}'
 ```
+
+- `number`: formato `55DDD9XXXXXXXX` (sem `+`, sem espaços)
+- Retorna `{"ok":true,"result":{...}}` com status `sent` se OK
+
+### POST /webhook
+Recebe eventos do WhatsMiau. Não requer auth (chamado pelo WhatsMiau).
+O webhook é **registrado automaticamente** na subida do servidor se `TALK_PUBLIC_URL` estiver definida.
 
 ## WhatsMiau
 
@@ -42,18 +85,15 @@ npx tsx src/send-buttons.ts 5519998170609 # Envia botões
 ### Endpoints confirmados
 - `POST /v2/message/sendText/:instance` — texto simples ✅
 - `POST /v2/message/sendButtons/:instance` — botões ✅
-- `POST /v2/webhook/set/:instance` — configura webhook
+- `POST /v2/webhook/set/:instance` — configura webhook (auto-registrado na subida)
 - `GET /v2/webhook/find/:instance` — consulta webhook atual
 - `GET /v2/instance/fetchInstances` — lista instâncias
 
 ### Lições aprendidas
-- A instância anterior tinha espaço no nome (`Facto Talk_d3c6f726`) e causava "instance not found" — a nova (`FactoTalk_d3c6f726`) funciona
-- O endpoint correto usa `/v2/` (sem isso também falha)
-- A API key fica no header `apikey` (não Bearer)
-- O webhook via API (`/v2/webhook/set`) retorna a URL interna do WhatsMiau na resposta, mas o GET mostra a URL real configurada — **a URL real só é atualizada pelo painel do dashboard**
-- O WhatsMiau Cloud às vezes tem instabilidade (timeout em `147.79.83.233`)
-- O localtunnel (`loca.lt`) é instável: pode retornar 503 e morrer — reiniciar gera nova URL
-- **Armadilha:** se a URL do webhook for colada com espaço no final (ex: `/webhook `) o WhatsMiau manda para `/webhook%20` e o servidor retorna 404 — verificar sem espaço
+- Instância sem espaço no nome: `FactoTalk_d3c6f726` (com espaço causa "instance not found")
+- Endpoint correto usa `/v2/` obrigatório
+- API key no header `apikey` (não Bearer)
+- URL do webhook sem espaço no final (espaço vira `%20` e dá 404)
 
 ### Payload do webhook recebido
 ```json
@@ -76,29 +116,24 @@ npx tsx src/send-buttons.ts 5519998170609 # Envia botões
 }
 ```
 
-### Resposta de botão
-O `selectedButtonId` fica em `data.message.buttonsResponseMessage.selectedButtonId`.
+## Dev Local
 
-## Webhook Setup
-
-1. Subir servidor: `npm run dev`
-2. Criar tunnel: `npx localtunnel --port 3000` → copiar URL
-3. Testar se o tunnel está vivo: `curl -X POST https://SUA-URL.loca.lt/webhook -H "Content-Type: application/json" -d '{"test":true}'` — deve retornar `{"ok":true}`
-4. Atualizar **no painel do WhatsMiau** (não via API — a API não atualiza a URL real):
-   ```
-   https://SUA-URL.loca.lt/webhook
-   ```
-5. **Atenção:** colar a URL sem espaço no final e sem `/webhook ` com espaço
-6. O localtunnel gera URL nova a cada restart — sempre atualizar no painel
-
-## Variáveis de Ambiente (.env)
-
+```bash
+cd /home/cucharo/projetos_rafael/facto_software_house/facto_talk_new
+docker-compose up -d      # sobe na porta 3020
+docker logs -f facto-talk # acompanha logs
 ```
-WHATSMIAU_API_KEY=00c348b3-217e-4d45-8b70-d0622a0c1c2c
-WHATSMIAU_INSTANCE=FactoTalk_d3c6f726
-WHATSMIAU_BASE_URL=https://api.whatsmiau.dev
-ANTHROPIC_API_KEY=        # preencher quando integrar Claude
-PORT=3000
+
+O `.env` local está em `/home/cucharo/projetos_rafael/facto_software_house/facto_talk_new/.env`.
+Para dev, `TALK_PUBLIC_URL` pode ficar vazio (webhook não será registrado, mas `/send-text` funciona normalmente).
+
+### Atenção: bug do docker-compose v1
+
+Se aparecer `KeyError: 'ContainerConfig'` ao fazer `up`, rodar:
+```bash
+docker ps -aq --filter "label=com.docker.compose.project=facto_talk_new" | xargs -r docker rm -f
+docker network ls --filter "name=facto_talk_new" -q | xargs -r docker network rm
+docker-compose up -d
 ```
 
 ## Números de Teste
@@ -109,7 +144,6 @@ PORT=3000
 
 ## Próximos Passos
 
-- [ ] Confirmar resposta automática dos botões (opt_in / opt_out) com webhook funcionando sem espaço na URL
+- [ ] Integrar Claude API (Haiku 4.5) para bot conversacional no `/webhook`
+- [ ] Conectar com Facto Insights v2 (backend chama `/send-text` via `http://host.docker.internal:3020`)
 - [ ] Testar outros tipos de mensagem (lista, enquete, localização, mídia)
-- [ ] Integrar Claude API para bot conversacional
-- [ ] Deploy em servidor com URL fixa (Railway, Render, Fly.io) para dispensar localtunnel
