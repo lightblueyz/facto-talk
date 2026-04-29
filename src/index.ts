@@ -1,19 +1,10 @@
 import 'dotenv/config'
 import Fastify from 'fastify'
 import axios from 'axios'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { runAgent } from './agent'
 import { sendTextMessage } from './whatsapp'
 
 const app = Fastify({ logger: true })
-
-const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
-const model = genai.getGenerativeModel({
-  model: 'gemini-flash-lite-latest',
-  systemInstruction: 'Você é o assistente do Facto Insights, uma plataforma de fidelização de clientes. Responda de forma simpática, direta e em português brasileiro. Seja conciso — mensagens curtas, no estilo WhatsApp.',
-})
-
-// Histórico de conversa por número (em memória)
-const conversations = new Map<string, { role: string; parts: { text: string }[] }[]>()
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
 const API_TOKEN = process.env.TALK_API_TOKEN
@@ -53,6 +44,7 @@ app.post('/webhook', async (request, reply) => {
 
   const { phone, text, buttonId } = msg
 
+  // Resposta rápida de botões (sem agente)
   if (buttonId) {
     if (buttonId === 'opt_in') await sendTextMessage(phone, 'Que ótimo! Fico feliz que podemos nos falar por aqui 😊')
     else if (buttonId === 'opt_out') await sendTextMessage(phone, 'Tudo bem, obrigado pela resposta! 🙏')
@@ -61,23 +53,12 @@ app.post('/webhook', async (request, reply) => {
 
   if (!text) return reply.send({ ok: true })
 
-  app.log.info({ phone, text }, 'mensagem recebida')
+  app.log.info({ phone, text }, 'mensagem recebida → agente')
 
-  try {
-    const history = conversations.get(phone) ?? []
-    const chat = model.startChat({ history })
-    const result = await chat.sendMessage(text)
-    const response = result.response.text()
-
-    history.push({ role: 'user', parts: [{ text }] })
-    history.push({ role: 'model', parts: [{ text: response }] })
-    conversations.set(phone, history)
-
-    await sendTextMessage(phone, response)
-    app.log.info({ phone, response }, 'resposta enviada')
-  } catch (err: any) {
-    app.log.error({ err: err?.message }, 'Erro ao chamar Gemini')
-  }
+  // Dispara o agente de forma assíncrona (não bloqueia o webhook)
+  runAgent(phone, text).catch((err) =>
+    app.log.error({ err: err?.message }, 'Erro no agente')
+  )
 
   return reply.send({ ok: true })
 })
