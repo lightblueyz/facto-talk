@@ -8,7 +8,7 @@ const app = Fastify({ logger: true })
 
 const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
 const model = genai.getGenerativeModel({
-  model: 'gemini-2.5-flash-lite-preview-06-17',
+  model: 'gemini-flash-lite-latest',
   systemInstruction: 'Você é o assistente do Facto Insights, uma plataforma de fidelização de clientes. Responda de forma simpática, direta e em português brasileiro. Seja conciso — mensagens curtas, no estilo WhatsApp.',
 })
 
