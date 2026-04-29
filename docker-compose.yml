@@ -14,4 +14,5 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TALK_PUBLIC_URL=${TALK_PUBLIC_URL}
       - TALK_API_TOKEN=${TALK_API_TOKEN}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     restart: unless-stopped
